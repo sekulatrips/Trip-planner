@@ -49,8 +49,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent); color: var(--accent-fg);
   padding: calc(env(safe-area-inset-top, 0px) + 14px) max(16px, env(safe-area-inset-right, 0px)) 14px max(16px, env(safe-area-inset-left, 0px));
 }
-.top h1 { margin: 0; font-size: 21px; font-weight: 750; letter-spacing: -0.01em; }
-.top p { margin: 2px 0 0; font-size: 13px; opacity: 0.85; }
+.top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 720px; margin: 0 auto; }
+.top-title { min-width: 0; }
+.top .app-name { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.8; }
+.top h1 { margin: 1px 0 0; font-size: 21px; font-weight: 750; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.trips-btn { flex: none; background: rgba(255,255,255,0.16); color: inherit; border: 1px solid rgba(255,255,255,0.35); border-radius: 10px; padding: 9px 14px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.trips-btn:active { background: rgba(255,255,255,0.28); }
+.trip-list { display: grid; gap: 8px; }
+.trip-item { display: grid; gap: 2px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+.trip-item.on { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.trip-item-name { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; }
+.trip-item-name .badge { margin-left: 6px; vertical-align: 2px; }
+.trip-item-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 main {
   padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
   max-width: 720px; margin: 0 auto; display: grid; gap: 14px;
@@ -164,8 +174,13 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
 </head>
 <body>
 <header class="top">
-  <h1>Trip Planner</h1>
-  <p id="topline">Your stops, legs and bookings, saved on this phone</p>
+  <div class="top-row">
+    <div class="top-title">
+      <p class="app-name">Trip Planner</p>
+      <h1 id="trip-name">My trip</h1>
+    </div>
+    <button class="trips-btn" type="button" id="open-trips" aria-label="Switch or add trips">Trips ▾</button>
+  </div>
 </header>
 
 <main>
@@ -193,8 +208,8 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
 
   <section class="view" id="view-backup" hidden>
     <div class="panel">
-      <h2>Back up your trip</h2>
-      <p>Your trip is stored only on this phone. Save a backup file now and then, and keep it somewhere safe, such as your email or Google Drive. If you change phones or clear the app, restore from that file.</p>
+      <h2>Back up your trips</h2>
+      <p>One backup file holds all your trips. They're stored only on this phone. Save a backup file now and then, and keep it somewhere safe, such as your email or Google Drive. If you change phones or clear the app, restore from that file.</p>
       <div class="btns">
         <button class="btn primary" type="button" id="share-backup">Share backup</button>
         <button class="btn" type="button" id="save-backup">Save backup file</button>
@@ -203,13 +218,13 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
     </div>
     <div class="panel">
       <h2>Restore from a backup</h2>
-      <p>This replaces everything in the app with the trip in the backup file.</p>
+      <p>Trips in the backup file replace the same trips in the app, and any others are added. Trips that aren't in the file are left alone.</p>
       <label class="btn" for="restore-file" style="color: var(--fg)">Choose backup file</label>
       <input type="file" id="restore-file" accept=".json,application/json" hidden>
     </div>
     <div class="panel">
       <h2>Open in Excel</h2>
-      <p>Saves your stops as a CSV file that opens in Excel or Google Sheets.</p>
+      <p>Saves the open trip's stops as a CSV file that opens in Excel or Google Sheets.</p>
       <div class="btns"><button class="btn" type="button" id="save-csv">Save as spreadsheet (CSV)</button></div>
     </div>
     <div class="panel">
@@ -299,6 +314,31 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
       <button class="btn primary" type="submit" id="editor-save">Save stop</button>
     </footer>
   </form>
+</dialog>
+
+<dialog id="trips-dlg" aria-labelledby="trips-title">
+  <div class="sheet">
+    <header>
+      <h2 id="trips-title">Your trips</h2>
+      <button class="x" type="button" id="trips-close" aria-label="Close">×</button>
+    </header>
+    <div class="body">
+      <p class="small">Tap a trip to open it. Each trip has its own legs, stops and totals.</p>
+      <div class="trip-list" id="trip-list"></div>
+      <div class="panel">
+        <h2>The open trip</h2>
+        <label for="trip-rename">Trip name
+          <input type="text" id="trip-rename" autocomplete="off">
+        </label>
+        <button class="btn" type="button" id="trip-copy">Make a copy of this trip</button>
+        <p class="small">A copy is handy for trying a different plan, such as Option 1 and Option 2.</p>
+        <button class="btn danger" type="button" id="trip-delete">Delete this trip</button>
+      </div>
+    </div>
+    <footer>
+      <button class="btn primary" type="button" id="trip-new">+ New trip</button>
+    </footer>
+  </div>
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>

@@ -1,5 +1,5 @@
 // Keeps the app working with no signal: serve from the phone's cache, refresh it when online.
-var CACHE = "trip-planner-v2";
+var CACHE = "trip-planner-v3";
 var FILES = ["./", "index.html", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {

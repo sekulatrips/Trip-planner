@@ -1,28 +1,37 @@
 (function () {
   "use strict";
 
-  var KEY = "trip-planner-v1";
+  var KEY = "trip-planner-v2";
+  var OLD_KEY = "trip-planner-v1"; // single-trip version; read once and kept as it was
   var NLEGS = 10;
   var DAY = 86400000;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   // ---------- data ----------
-  function freshTrip() {
+  // store = { version: 2, current: tripId, trips: [{ id, name, legs, stops }], lastBackup, changedSinceBackup }
+  var STARTERS = [
+    ["Inland south", "Durren Durren → Yarrawonga → Mildura → Geelong"],
+    ["Tasmania", "Devonport loop, Spirit of Tasmania both ways"],
+    ["Coast north", "Geelong → coast → Brisbane"]
+  ];
+  function blankLegs(starters) {
     var legs = [];
-    var starters = [
-      ["Inland south", "Durren Durren → Yarrawonga → Mildura → Geelong"],
-      ["Tasmania", "Devonport loop, Spirit of Tasmania both ways"],
-      ["Coast north", "Geelong → coast → Brisbane"]
-    ];
     for (var i = 1; i <= NLEGS; i++) {
       var s = starters[i - 1];
       legs.push({ n: i, name: s ? s[0] : "", route: s ? s[1] : "" });
     }
-    return { version: 1, legs: legs, stops: [], lastBackup: null, changedSinceBackup: false };
+    return legs;
+  }
+  function freshTrip(name, starters) {
+    return { id: uid(), name: name || "My trip", legs: blankLegs(starters || []), stops: [] };
+  }
+  function freshStore() {
+    var t = freshTrip("My trip", STARTERS);
+    return { version: 2, current: t.id, trips: [t], lastBackup: null, changedSinceBackup: false };
   }
 
-  function normalise(t) {
+  function normaliseTrip(t) {
     var base = freshTrip();
     if (!t || typeof t !== "object") return base;
     var legs = base.legs.map(function (l) {
@@ -42,17 +51,41 @@
         web: cleanUrl(s.web), map: cleanUrl(s.map)
       };
     });
-    return { version: 1, legs: legs, stops: stops, lastBackup: t.lastBackup || null, changedSinceBackup: !!t.changedSinceBackup };
+    return { id: String(t.id || uid()), name: String(t.name || "My trip").trim() || "My trip", legs: legs, stops: stops };
+  }
+
+  // Accepts the current format, or the older one-trip format (which becomes the first trip)
+  function normaliseStore(s) {
+    if (!s || typeof s !== "object") return freshStore();
+    if (!Array.isArray(s.trips)) {
+      var only = normaliseTrip(s);
+      return { version: 2, current: only.id, trips: [only], lastBackup: s.lastBackup || null, changedSinceBackup: !!s.changedSinceBackup };
+    }
+    var trips = s.trips.map(normaliseTrip);
+    if (!trips.length) return freshStore();
+    var current = trips.some(function (t) { return t.id === s.current; }) ? s.current : trips[0].id;
+    return { version: 2, current: current, trips: trips, lastBackup: s.lastBackup || null, changedSinceBackup: !!s.changedSinceBackup };
   }
 
   function load() {
-    try { return normalise(JSON.parse(localStorage.getItem(KEY))); } catch (e) { return freshTrip(); }
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) return normaliseStore(JSON.parse(raw));
+      var old = localStorage.getItem(OLD_KEY);
+      if (old) {
+        var moved = normaliseStore(JSON.parse(old));
+        localStorage.setItem(KEY, JSON.stringify(moved));
+        return moved;
+      }
+    } catch (e) {}
+    return freshStore();
   }
-  function save() {
-    trip.changedSinceBackup = true;
-    try { localStorage.setItem(KEY, JSON.stringify(trip)); }
+  function persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(store)); }
     catch (e) { toast("Couldn't save on this phone. Storage may be full."); }
   }
+  function save() { store.changedSinceBackup = true; persist(); }
+  function currentTrip() { return store.trips.filter(function (t) { return t.id === store.current; })[0] || store.trips[0]; }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
   // Only keep web links; add https:// when someone pastes "hipcamp.com/..."
@@ -63,7 +96,8 @@
     try { var u = new URL(v); return u.protocol === "https:" || u.protocol === "http:" ? u.href : ""; } catch (e) { return ""; }
   }
 
-  var trip = load();
+  var store = load();
+  var trip = currentTrip();
 
   // ---------- helpers ----------
   function $(id) { return document.getElementById(id); }
@@ -343,12 +377,12 @@
   // ---------- backup ----------
   function stamp() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function backupBlob() {
-    var copy = { app: "Trip Planner", version: 1, savedAt: new Date().toISOString(), legs: trip.legs, stops: trip.stops };
+    var copy = { app: "Trip Planner", version: 2, savedAt: new Date().toISOString(), current: store.current, trips: store.trips };
     return new Blob([JSON.stringify(copy, null, 2)], { type: "application/json" });
   }
   function markBackedUp() {
-    trip.lastBackup = new Date().toISOString(); trip.changedSinceBackup = false;
-    try { localStorage.setItem(KEY, JSON.stringify(trip)); } catch (e) {}
+    store.lastBackup = new Date().toISOString(); store.changedSinceBackup = false;
+    persist();
     renderBackup();
   }
   function download(blob, name) {
@@ -379,11 +413,22 @@
     r.onload = function () {
       try {
         var data = JSON.parse(r.result);
-        if (!data || !Array.isArray(data.stops) || !Array.isArray(data.legs)) throw new Error("bad");
-        var keep = { lastBackup: trip.lastBackup };
-        trip = normalise(data); trip.lastBackup = keep.lastBackup; trip.changedSinceBackup = false;
-        localStorage.setItem(KEY, JSON.stringify(trip));
-        renderAll(); toast("Trip restored: " + plural(trip.stops.length, "stop"));
+        var incoming;
+        if (data && Array.isArray(data.trips)) incoming = normaliseStore(data).trips;
+        else if (data && Array.isArray(data.stops) && Array.isArray(data.legs)) {
+          var single = normaliseTrip(data); single.id = uid(); single.name = data.name || "Restored trip";
+          incoming = [single];
+        } else throw new Error("bad");
+        // Trips in the backup replace the same trips here; any others are added. Nothing else is removed.
+        incoming.forEach(function (t) {
+          var i = store.trips.map(function (x) { return x.id; }).indexOf(t.id);
+          if (i >= 0) store.trips[i] = t; else store.trips.push(t);
+        });
+        store.current = incoming[0].id;
+        trip = currentTrip();
+        persist();
+        show("stops");
+        toast(incoming.length === 1 ? "Restored “" + trip.name + "”" : "Restored " + incoming.length + " trips");
       } catch (err) { toast("That file isn't a Trip Planner backup."); }
       e.target.value = "";
     };
@@ -398,15 +443,17 @@
       rows.push([s.leg, s.leg ? legName(s.leg) : "", s.arrive, s.depart, n == null ? "" : n, s.location, s.stay, s.site, s.dog, s.booked, s.cost, s.km, s.notes, s.web, mapUrl(s)]);
     });
     var csv = "﻿" + rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n");
-    download(new Blob([csv], { type: "text/csv" }), "trip-" + stamp() + ".csv");
+    var slug = trip.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "trip";
+    download(new Blob([csv], { type: "text/csv" }), slug + "-" + stamp() + ".csv");
     toast("Spreadsheet saved to your Downloads");
   });
 
   function renderBackup() {
-    $("last-backup").textContent = trip.lastBackup
-      ? "Last backup: " + new Date(trip.lastBackup).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
+    $("last-backup").textContent = store.lastBackup
+      ? "Last backup: " + new Date(store.lastBackup).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
       : "You haven't saved a backup yet.";
-    var stale = trip.stops.length && trip.changedSinceBackup && (!trip.lastBackup || Date.now() - Date.parse(trip.lastBackup) > 7 * DAY);
+    var anyStops = store.trips.some(function (t) { return t.stops.length; });
+    var stale = anyStops && store.changedSinceBackup && (!store.lastBackup || Date.now() - Date.parse(store.lastBackup) > 7 * DAY);
     $("backup-banner").hidden = !stale;
   }
   $("banner-go").addEventListener("click", function () { show("backup"); });
@@ -435,7 +482,83 @@
   }
   document.querySelectorAll("nav.tabs button").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.view); }); });
 
-  function renderAll() { renderSummary(); renderStops(); renderBackup(); }
+  // ---------- trips ----------
+  var tripsDlg = $("trips-dlg");
+  var tripDeleteArmed = false;
+
+  function switchTrip(id) {
+    store.current = id; trip = currentTrip(); persist();
+    show("stops");
+  }
+
+  function renderTrips() {
+    $("trip-list").innerHTML = store.trips.map(function (t) {
+      var tt = totals(t.stops);
+      var line = t.stops.length
+        ? (tt.first ? fmt(tt.first, true) + " – " + fmt(tt.last || tt.first, true) + " · " : "") + plural(t.stops.length, "stop") + " · " + plural(tt.nights, "night")
+        : "No stops yet";
+      var on = t.id === trip.id;
+      return '<button class="trip-item' + (on ? " on" : "") + '" type="button" data-trip="' + esc(t.id) + '"' + (on ? ' aria-current="true"' : "") + ">" +
+        '<span class="trip-item-name">' + esc(t.name) + (on ? ' <span class="badge">Open</span>' : "") + "</span>" +
+        '<span class="trip-item-meta">' + esc(line) + "</span></button>";
+    }).join("");
+    $("trip-rename").value = trip.name;
+    $("trip-delete").hidden = store.trips.length < 2;
+    tripDeleteArmed = false; $("trip-delete").textContent = "Delete this trip";
+  }
+
+  function openTrips() { renderTrips(); tripsDlg.showModal(); }
+  $("open-trips").addEventListener("click", openTrips);
+  $("trips-close").addEventListener("click", function () { tripsDlg.close(); });
+
+  $("trip-list").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-trip]"); if (!b) return;
+    tripsDlg.close();
+    if (b.dataset.trip !== trip.id) { switchTrip(b.dataset.trip); toast("Opened “" + trip.name + "”"); }
+  });
+
+  $("trip-rename").addEventListener("input", function (e) {
+    trip.name = e.target.value.trim() || "My trip";
+    save(); renderHeader();
+    var item = document.querySelector('.trip-item[data-trip="' + trip.id + '"] .trip-item-name');
+    if (item) item.firstChild.textContent = trip.name + " ";
+  });
+
+  $("trip-new").addEventListener("click", function () {
+    var t = freshTrip("New trip " + (store.trips.length + 1), []);
+    store.trips.push(t); store.current = t.id; trip = t; save();
+    renderTrips(); renderAll();
+    var input = $("trip-rename"); input.focus(); input.select();
+    toast("New trip made. Type its name above.");
+  });
+
+  $("trip-copy").addEventListener("click", function () {
+    var t = JSON.parse(JSON.stringify(trip));
+    t.id = uid(); t.name = trip.name + " (copy)";
+    t.stops.forEach(function (s) { s.id = uid(); });
+    store.trips.push(t); store.current = t.id; trip = t; save();
+    renderTrips(); renderAll();
+    var input = $("trip-rename"); input.focus(); input.select();
+    toast("Copy made. Rename it above.");
+  });
+
+  $("trip-delete").addEventListener("click", function () {
+    var b = $("trip-delete");
+    if (store.trips.length < 2) return;
+    if (!tripDeleteArmed) {
+      tripDeleteArmed = true; b.textContent = "Tap again to delete “" + trip.name + "”";
+      setTimeout(function () { tripDeleteArmed = false; b.textContent = "Delete this trip"; }, 3000);
+      return;
+    }
+    var gone = trip.name;
+    store.trips = store.trips.filter(function (t) { return t.id !== trip.id; });
+    store.current = store.trips[0].id; trip = currentTrip(); save();
+    tripsDlg.close(); show("stops"); toast("Deleted “" + gone + "”");
+  });
+
+  function renderHeader() { $("trip-name").textContent = trip.name; document.title = trip.name + " · Trip Planner"; }
+
+  function renderAll() { renderHeader(); renderSummary(); renderStops(); renderBackup(); }
 
   renderAll();
 
