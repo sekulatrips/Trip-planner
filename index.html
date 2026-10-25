@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trip Planner</title>
+<meta name="description" content="Caravan trip planner that keeps your stops, legs and bookings on your phone.">
+<meta name="theme-color" content="#2f6b5a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<style>
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --fg: #1c2420;
+  --muted: #5d6a63;
+  --line: #dde2dc;
+  --accent: #2f6b5a;
+  --accent-fg: #ffffff;
+  --accent-soft: #e2efe9;
+  --yes: #d9eee3; --yes-fg: #1f5a40;
+  --no: #fbe3c8;  --no-fg: #7a4a12;
+  --chk: #fff1a8; --chk-fg: #6b5800;
+  --bad: #b3261e;
+  --l1: #9cc3e0; --l2: #a9cf8c; --l3: #e8b07c; --l4: #c3a3df; --l5: #e3cc5a;
+  --l6: #86cfc4; --l7: #e59bb1; --l8: #a9a9e6; --l9: #b8cc8a; --l10: #d9ad8f;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121715; --surface: #1b221f; --fg: #e5ebe7; --muted: #9aa69f; --line: #2c3530;
+    --accent: #6fb79f; --accent-fg: #0e1a15; --accent-soft: #1f322b;
+    --yes: #1e3a2d; --yes-fg: #9fdcbc; --no: #40301c; --no-fg: #f0c48e; --chk: #3d3814; --chk-fg: #ecdc7a;
+    --bad: #f2b8b5;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+.top {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--accent); color: var(--accent-fg);
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) max(16px, env(safe-area-inset-right, 0px)) 14px max(16px, env(safe-area-inset-left, 0px));
+}
+.top h1 { margin: 0; font-size: 21px; font-weight: 750; letter-spacing: -0.01em; }
+.top p { margin: 2px 0 0; font-size: 13px; opacity: 0.85; }
+main {
+  padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+  max-width: 720px; margin: 0 auto; display: grid; gap: 14px;
+}
+.view[hidden] { display: none !important; }
+.view { display: grid; gap: 14px; }
+
+.summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.stat { background: var(--surface); padding: 10px 12px; min-width: 0; }
+.stat.wide { grid-column: 1 / -1; }
+.stat .k { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 14px; font-size: 14px; white-space: nowrap; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.leg { display: grid; gap: 8px; }
+.leg-head { display: flex; gap: 10px; align-items: flex-start; padding: 4px 2px 0; }
+.dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--muted); margin-top: 5px; }
+.leg-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.leg-head .meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.leg-head > div { min-width: 0; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; border-left-width: 5px; overflow: hidden; }
+.card-main { display: grid; gap: 6px; width: 100%; padding: 12px 14px; background: none; border: 0; text-align: left; cursor: pointer; }
+.card-main:active { background: var(--accent-soft); }
+.card-links { display: flex; border-top: 1px solid var(--line); }
+.card-links a { flex: 1; text-align: center; padding: 10px 6px; font-size: 14px; font-weight: 650; color: var(--accent); text-decoration: none; border-left: 1px solid var(--line); }
+.card-links a:first-child { border-left: 0; }
+.card-links a:active { background: var(--accent-soft); }
+.route-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.route-links a { font-size: 13px; font-weight: 650; color: var(--accent); text-decoration: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 10px; }
+.links-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+.links-box legend { font-size: 13px; font-weight: 700; color: var(--fg); padding: 0 4px; }
+input[type="url"] { width: 100%; min-width: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 9px; padding: 11px 12px; font-size: 16px; font-weight: 400; color: var(--fg); }
+.card .when { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.card .when.bad { color: var(--bad); font-weight: 600; }
+.card .where { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.card .stay { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.card .notes { font-size: 14px; overflow-wrap: anywhere; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--fg); font-variant-numeric: tabular-nums; }
+.badge.yes { background: var(--yes); color: var(--yes-fg); }
+.badge.no { background: var(--no); color: var(--no-fg); }
+.badge.chk { background: var(--chk); color: var(--chk-fg); }
+
+.empty { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 22px 18px; text-align: center; color: var(--muted); }
+.empty strong { display: block; color: var(--fg); font-size: 17px; margin-bottom: 4px; }
+
+.fab {
+  position: fixed; right: max(18px, env(safe-area-inset-right, 0px)); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 6;
+  background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 16px; padding: 15px 20px; font-weight: 700; font-size: 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.22); cursor: pointer;
+}
+nav.tabs {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(3, 1fr);
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+nav.tabs button { background: none; border: 0; padding: 12px 6px 14px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+nav.tabs button[aria-current="page"] { color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+.panel h2 { margin: 0; font-size: 17px; }
+.panel p { margin: 0; color: var(--muted); font-size: 14px; }
+
+.leg-row { display: grid; grid-template-columns: 30px 1fr; gap: 6px 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.leg-row:first-of-type { border-top: 0; }
+.leg-num { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #1c2420; }
+.leg-row .totals { grid-column: 2; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.leg-row .route { grid-column: 2; }
+
+label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+input[type="text"], input[type="date"], input[type="number"], select, textarea {
+  width: 100%; min-width: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 9px; padding: 11px 12px; font-size: 16px; font-weight: 400; color: var(--fg);
+}
+textarea { min-height: 80px; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row2 > * { min-width: 0; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; border-left: 1px solid var(--line); background: var(--bg); padding: 10px 4px; font-size: 14px; cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: 650; }
+
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 16px; font-weight: 650; cursor: pointer; text-align: center; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.danger { color: var(--bad); }
+.btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.btns .btn { flex: 1 1 140px; }
+
+dialog { border: 0; padding: 0; width: 100%; max-width: 720px; max-height: 100%; height: 100%; margin: 0 auto; background: var(--bg); color: var(--fg); }
+dialog::backdrop { background: rgba(0,0,0,0.4); }
+.sheet { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+.sheet header { background: var(--surface); border-bottom: 1px solid var(--line); padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sheet header h2 { margin: 0; font-size: 18px; }
+.sheet .body { overflow-y: auto; padding: 16px; display: grid; gap: 14px; align-content: start; }
+.sheet footer { background: var(--surface); border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 10px; }
+.sheet footer .btn { flex: 1; }
+.x { background: none; border: 0; font-size: 26px; line-height: 1; padding: 4px 8px; cursor: pointer; color: var(--muted); }
+.nights-note { font-size: 14px; color: var(--muted); }
+.nights-note.bad { color: var(--bad); font-weight: 600; }
+
+.banner { background: var(--chk); color: var(--chk-fg); border-radius: 12px; padding: 10px 14px; font-size: 14px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.banner button { border: 0; background: none; font-weight: 700; text-decoration: underline; cursor: pointer; color: inherit; padding: 4px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(140px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 20; max-width: calc(100% - 32px); }
+.small { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Trip Planner</h1>
+  <p id="topline">Your stops, legs and bookings, saved on this phone</p>
+</header>
+
+<main>
+  <section class="view" id="view-stops">
+    <div id="backup-banner" class="banner" hidden>
+      <span>You haven't saved a backup lately.</span>
+      <button type="button" id="banner-go">Back up now</button>
+    </div>
+    <div class="summary" id="summary" aria-label="Trip totals"></div>
+    <div class="chips" role="group" aria-label="Show">
+      <button class="chip" type="button" data-filter="all" aria-pressed="true">All stops</button>
+      <button class="chip" type="button" data-filter="notbooked" aria-pressed="false">Not booked</button>
+      <button class="chip" type="button" data-filter="dog" aria-pressed="false">Dog not confirmed</button>
+    </div>
+    <div id="stops" class="view"></div>
+  </section>
+
+  <section class="view" id="view-legs" hidden>
+    <div class="panel">
+      <h2>Trip legs</h2>
+      <p>Name each leg here. Give a stop its leg number and it shows under that leg's title. Rename a leg any time and every stop in it follows.</p>
+      <div id="legs"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-backup" hidden>
+    <div class="panel">
+      <h2>Back up your trip</h2>
+      <p>Your trip is stored only on this phone. Save a backup file now and then, and keep it somewhere safe, such as your email or Google Drive. If you change phones or clear the app, restore from that file.</p>
+      <div class="btns">
+        <button class="btn primary" type="button" id="share-backup">Share backup</button>
+        <button class="btn" type="button" id="save-backup">Save backup file</button>
+      </div>
+      <p class="small" id="last-backup"></p>
+    </div>
+    <div class="panel">
+      <h2>Restore from a backup</h2>
+      <p>This replaces everything in the app with the trip in the backup file.</p>
+      <label class="btn" for="restore-file" style="color: var(--fg)">Choose backup file</label>
+      <input type="file" id="restore-file" accept=".json,application/json" hidden>
+    </div>
+    <div class="panel">
+      <h2>Open in Excel</h2>
+      <p>Saves your stops as a CSV file that opens in Excel or Google Sheets.</p>
+      <div class="btns"><button class="btn" type="button" id="save-csv">Save as spreadsheet (CSV)</button></div>
+    </div>
+    <div class="panel">
+      <h2>Storage</h2>
+      <p id="storage-status">Checking…</p>
+    </div>
+  </section>
+</main>
+
+<button class="fab" type="button" id="add-stop" aria-label="Add a stop">+ Add stop</button>
+
+<nav class="tabs" aria-label="Sections">
+  <button type="button" data-view="stops" aria-current="page">Stops</button>
+  <button type="button" data-view="legs">Legs</button>
+  <button type="button" data-view="backup">Backup</button>
+</nav>
+
+<dialog id="editor" aria-labelledby="editor-title">
+  <form class="sheet" id="stop-form" method="dialog" novalidate>
+    <header>
+      <h2 id="editor-title">New stop</h2>
+      <button class="x" type="button" id="editor-close" aria-label="Close without saving">×</button>
+    </header>
+    <div class="body">
+      <label for="f-leg">Leg
+        <select id="f-leg"></select>
+      </label>
+      <label for="f-location">Location
+        <input type="text" id="f-location" placeholder="Town or area" autocomplete="off">
+      </label>
+      <div class="row2">
+        <label for="f-arrive">Arrive
+          <input type="date" id="f-arrive">
+        </label>
+        <label for="f-depart">Depart
+          <input type="date" id="f-depart">
+        </label>
+      </div>
+      <div class="nights-note" id="f-nights"></div>
+      <label for="f-stay">Where we're staying
+        <input type="text" id="f-stay" placeholder="Caravan park or camp" autocomplete="off">
+      </label>
+      <label for="f-site">Site type
+        <select id="f-site">
+          <option value="">–</option>
+          <option>Powered</option><option>Unpowered</option><option>Free camp</option><option>Showground</option>
+          <option>Station stay</option><option>Ferry / overnight</option><option>Other</option>
+        </select>
+      </label>
+      <div>
+        <label id="dog-label">Dog OK?</label>
+        <div class="seg" role="group" aria-labelledby="dog-label" data-field="dog">
+          <button type="button" data-v="">–</button><button type="button" data-v="Yes">Yes</button><button type="button" data-v="No">No</button><button type="button" data-v="Check">Check</button>
+        </div>
+      </div>
+      <div>
+        <label id="booked-label">Booked?</label>
+        <div class="seg" role="group" aria-labelledby="booked-label" data-field="booked">
+          <button type="button" data-v="">–</button><button type="button" data-v="Yes">Yes</button><button type="button" data-v="No">No</button><button type="button" data-v="Check">Check</button>
+        </div>
+      </div>
+      <div class="row2">
+        <label for="f-cost">Cost (AUD)
+          <input type="number" id="f-cost" inputmode="decimal" min="0" step="1">
+        </label>
+        <label for="f-km">Drive (km)
+          <input type="number" id="f-km" inputmode="numeric" min="0" step="1">
+        </label>
+      </div>
+      <label for="f-notes">Notes
+        <textarea id="f-notes" placeholder="Bookings, dog sitter, things to see"></textarea>
+      </label>
+      <fieldset class="links-box">
+        <legend>Links</legend>
+        <label for="f-web">Hipcamp page or website
+          <input type="url" id="f-web" inputmode="url" placeholder="Paste the link here" autocomplete="off">
+        </label>
+        <label for="f-map">Map link (optional)
+          <input type="url" id="f-map" inputmode="url" placeholder="Paste a Google Maps link" autocomplete="off">
+        </label>
+        <p class="small">Leave the map link empty and the app searches Google Maps for where you're staying and the location.</p>
+      </fieldset>
+      <button class="btn danger" type="button" id="delete-stop">Delete this stop</button>
+    </div>
+    <footer>
+      <button class="btn" type="button" id="editor-cancel">Cancel</button>
+      <button class="btn primary" type="submit" id="editor-save">Save stop</button>
+    </footer>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
