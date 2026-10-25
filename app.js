@@ -723,6 +723,15 @@
 
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+    // When a new version takes over, reload once so it shows straight away (nothing typed is lost: every change is already saved)
+    var hadController = !!navigator.serviceWorker.controller, reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (!hadController || reloaded) return;
+      if (dlg.open || tripsDlg.open) return; // don't reload under someone typing; it shows next time
+      reloaded = true; location.reload();
+    });
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(function (reg) { reg.update(); }).catch(function () {});
+    });
   }
 })();
