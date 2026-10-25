@@ -48,7 +48,8 @@
         cost: s.cost === "" || s.cost == null ? "" : +s.cost,
         km: s.km === "" || s.km == null ? "" : +s.km,
         notes: String(s.notes || ""),
-        web: cleanUrl(s.web), map: cleanUrl(s.map)
+        web: cleanUrl(s.web), map: cleanUrl(s.map),
+        geo: cleanGeo(s.geo)
       };
     });
     return { id: String(t.id || uid()), name: String(t.name || "My trip").trim() || "My trip", legs: legs, stops: stops };
@@ -87,6 +88,14 @@
   function save() { store.changedSinceBackup = true; persist(); }
   function currentTrip() { return store.trips.filter(function (t) { return t.id === store.current; })[0] || store.trips[0]; }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  // Where a stop's location was found on the map: { q: the location searched, lat, lng } or { q, none: true }
+  function cleanGeo(g) {
+    if (!g || typeof g !== "object" || !g.q) return null;
+    if (g.none) return { q: String(g.q), none: true };
+    var lat = +g.lat, lng = +g.lng;
+    return isFinite(lat) && isFinite(lng) ? { q: String(g.q), lat: lat, lng: lng } : null;
+  }
 
   // Only keep web links; add https:// when someone pastes "hipcamp.com/..."
   function cleanUrl(v) {
@@ -245,9 +254,10 @@
       if (t.km) meta.push(km(t.km));
       if (t.cost) meta.push(money(t.cost));
       var routes = routeLinks(all);
-      var routeHtml = routes.length ? '<div class="route-links">' + routes.map(function (u, i) {
-        return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + (routes.length > 1 ? "Route map, part " + (i + 1) : "Route map") + "</a>";
-      }).join("") + "</div>" : "";
+      var hasPlace = all.some(function (s) { return s.location.trim(); });
+      var routeHtml = (g.n && hasPlace) || routes.length ? '<div class="route-links">' +
+        (g.n && hasPlace ? '<button class="map-btn" type="button" data-map="' + g.n + '">Show map</button>' : "") +
+        routeLinkHtml(routes) + "</div>" : "";
       return '<div class="leg"><div class="leg-head"><span class="dot" style="background:' + legColour(g.n) + '"></span><div>' +
         "<h2>" + esc(title) + '</h2><div class="meta">' + esc(meta.join(" · ")) + "</div>" + routeHtml + "</div></div>" +
         g.stops.map(stopCard).join("") + "</div>";
@@ -255,8 +265,151 @@
   }
 
   $("stops").addEventListener("click", function (e) {
+    var m = e.target.closest("[data-map]"); if (m) { openMap(+m.dataset.map); return; }
     var c = e.target.closest(".card-main"); if (c) openEditor(c.dataset.id);
   });
+  $("whole-map").addEventListener("click", function () { openMap("all"); });
+
+  function routeLinkHtml(routes) {
+    return routes.map(function (u, i) {
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + (routes.length > 1 ? "Google Maps route, part " + (i + 1) : "Google Maps route") + "</a>";
+    }).join("");
+  }
+
+  // ---------- maps ----------
+  // Map pictures come from OpenStreetMap; places are looked up once with OpenStreetMap's
+  // free search (one at a time, as its rules ask) and remembered on the stop.
+  var LEG_HEX = ["#9cc3e0", "#a9cf8c", "#e8b07c", "#c3a3df", "#e3cc5a", "#86cfc4", "#e59bb1", "#a9a9e6", "#b8cc8a", "#d9ad8f"];
+  var mapDlg = $("map-dlg");
+  var leaflet = null, pins = null, mapJob = 0, mapStops = [], mapMarkers = {};
+  var lookups = {}; // this session's searches, so one town is only looked up once
+
+  function geoQuery(s) { return s.location.trim(); }
+  function needsGeo(s) { var q = geoQuery(s); return !!q && (!s.geo || s.geo.q !== q); }
+
+  function search(q, australiaOnly) {
+    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en-AU" +
+      (australiaOnly ? "&countrycodes=au" : "") + "&q=" + encodeURIComponent(q);
+    return fetch(url).then(function (r) { if (!r.ok) throw new Error("search " + r.status); return r.json(); });
+  }
+  function geocode(q) {
+    if (lookups[q]) return Promise.resolve(lookups[q]);
+    return search(q, true).then(function (a) {
+      if (a && a[0]) return a;
+      return new Promise(function (ok) { setTimeout(ok, 1100); }).then(function () { return search(q, false); });
+    }).then(function (a) {
+      var g = a && a[0] ? { q: q, lat: +a[0].lat, lng: +a[0].lon } : { q: q, none: true };
+      lookups[q] = g;
+      return g;
+    });
+  }
+
+  function pinHtml(n, colour) { return '<div class="pin" style="background:' + colour + '">' + n + "</div>"; }
+  function stopColour(s, legN) { var n = legN === "all" ? s.leg : legN; return LEG_HEX[n - 1] || "#d0d6d1"; }
+
+  function setMapStatus(text) { var el = $("map-status"); el.textContent = text || ""; el.hidden = !text; }
+
+  function drawMap(legN, fit) {
+    if (!leaflet) return;
+    pins.clearLayers(); mapMarkers = {};
+    var pts = [];
+    mapStops.forEach(function (s, i) {
+      if (!s.geo || s.geo.none) return;
+      var ll = [s.geo.lat, s.geo.lng];
+      pts.push(ll);
+      var n = nights(s);
+      var pop = "<strong>" + esc(i + 1 + ". " + s.location) + "</strong>" +
+        (s.arrive || s.depart ? esc((fmt(s.arrive) || "?") + " → " + (fmt(s.depart) || "?") + (n != null && n >= 0 ? " · " + plural(n, "night") : "")) + "<br>" : "") +
+        (s.stay ? esc(s.stay) : "");
+      mapMarkers[s.id] = L.marker(ll, {
+        icon: L.divIcon({ className: "", html: pinHtml(i + 1, stopColour(s, legN)), iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12] }),
+        title: s.location
+      }).bindPopup(pop).addTo(pins);
+    });
+    if (pts.length > 1) L.polyline(pts, { color: "#2f6b5a", weight: 3, opacity: 0.8, dashArray: "6 8" }).addTo(pins);
+    if (fit) {
+      if (pts.length > 1) leaflet.fitBounds(pts, { padding: [36, 36], maxZoom: 11 });
+      else if (pts.length === 1) leaflet.setView(pts[0], 10);
+      else leaflet.setView([-28, 134], 4); // Australia
+    }
+    var missing = mapStops.filter(function (s) { return s.geo && s.geo.none; }).map(function (s) { return s.location; });
+    $("map-missing").hidden = !missing.length;
+    $("map-missing").textContent = missing.length ? "Couldn't find on the map: " + missing.join(", ") + ". Check the spelling, or add the state (for example “Burrum Heads QLD”)." : "";
+    document.querySelectorAll("#map-list li").forEach(function (li) {
+      var s = mapStops[+li.dataset.i];
+      li.classList.toggle("off", !(s.geo && !s.geo.none));
+    });
+  }
+
+  function renderMapList(legN) {
+    $("map-list").innerHTML = mapStops.map(function (s, i) {
+      var n = nights(s);
+      var dt = s.arrive ? fmt(s.arrive) + (n != null && n >= 0 ? " · " + plural(n, "night") : "") : "";
+      return '<li data-i="' + i + '"><button type="button" data-stop="' + esc(s.id) + '">' + pinHtml(i + 1, stopColour(s, legN)) +
+        '<span class="nm">' + esc(s.location) + '</span><span class="dt">' + esc(dt) + "</span></button></li>";
+    }).join("");
+  }
+  $("map-list").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-stop]"); if (!b) return;
+    var m = mapMarkers[b.dataset.stop];
+    if (m) { leaflet.setView(m.getLatLng(), Math.max(leaflet.getZoom(), 10)); m.openPopup(); }
+    else toast("That place isn't on the map yet.");
+  });
+
+  function openMap(legN) {
+    var job = ++mapJob;
+    mapStops = trip.stops.filter(function (s) { return (legN === "all" || s.leg === legN) && s.location.trim(); }).sort(byDate);
+    var t = totals(mapStops);
+    $("map-title").textContent = legN === "all" ? trip.name : "Leg " + legN + " · " + legName(legN);
+    $("map-sub").textContent = plural(mapStops.length, "stop") + (t.first ? " · " + fmt(t.first) + " – " + fmt(t.last || t.first) : "") + (t.km ? " · " + km(t.km) : "");
+    $("map-routes").innerHTML = legN === "all" ? "" : routeLinkHtml(routeLinks(mapStops));
+    renderMapList(legN);
+    mapDlg.showModal();
+
+    if (!window.L) { setMapStatus("The map couldn't load. Check you have signal and try again."); return; }
+    if (!leaflet) {
+      leaflet = L.map("map", { zoomControl: true, attributionControl: true });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+      }).addTo(leaflet);
+      pins = L.layerGroup().addTo(leaflet);
+    }
+    setTimeout(function () { if (job !== mapJob) return; leaflet.invalidateSize(); drawMap(legN, true); }, 60);
+
+    var todo = mapStops.filter(needsGeo);
+    if (!todo.length) { setMapStatus(navigator.onLine === false ? "No signal: the map pictures need internet." : ""); return; }
+    if (navigator.onLine === false) { setMapStatus("No signal: places will be found when you're back online."); return; }
+
+    var done = 0, found = false;
+    setMapStatus("Finding places on the map… 0 of " + todo.length);
+    (function next() {
+      if (job !== mapJob || !mapDlg.open) return;
+      if (!todo.length) {
+        setMapStatus("");
+        if (found) persist();
+        drawMap(legN, true);
+        return;
+      }
+      var s = todo.shift(), q = geoQuery(s), cached = !!lookups[q];
+      geocode(q).then(function (g) {
+        trip.stops.forEach(function (x) { if (geoQuery(x) === q) x.geo = g; });
+        found = true; done++;
+        if (job !== mapJob) return;
+        setMapStatus("Finding places on the map… " + done + " of " + (done + todo.length));
+        drawMap(legN, false);
+        setTimeout(next, cached ? 0 : 1100);
+      }).catch(function () {
+        if (job !== mapJob) return;
+        if (found) persist();
+        setMapStatus("Couldn't reach the map search. Try again when you have signal.");
+        drawMap(legN, true);
+      });
+    })();
+  }
+
+  function closeMap() { mapJob++; mapDlg.close(); }
+  $("map-close").addEventListener("click", closeMap);
+  mapDlg.addEventListener("cancel", function () { mapJob++; });
   document.querySelectorAll("[data-filter]").forEach(function (b) {
     b.addEventListener("click", function () {
       filter = b.dataset.filter;
@@ -351,8 +504,11 @@
       cost: $("f-cost").value === "" ? "" : +$("f-cost").value,
       km: $("f-km").value === "" ? "" : +$("f-km").value,
       notes: $("f-notes").value.trim(),
-      web: cleanUrl($("f-web").value), map: cleanUrl($("f-map").value)
+      web: cleanUrl($("f-web").value), map: cleanUrl($("f-map").value),
+      geo: null
     };
+    var before = editing && trip.stops.filter(function (x) { return x.id === editing; })[0];
+    if (before && before.geo && before.geo.q === s.location) s.geo = before.geo;
     if (editing) trip.stops = trip.stops.map(function (x) { return x.id === editing ? s : x; });
     else trip.stops.push(s);
     save(); dlg.close(); renderAll();
@@ -558,7 +714,10 @@
 
   function renderHeader() { $("trip-name").textContent = trip.name; document.title = trip.name + " · Trip Planner"; }
 
-  function renderAll() { renderHeader(); renderSummary(); renderStops(); renderBackup(); }
+  function renderAll() {
+    renderHeader(); renderSummary(); renderStops(); renderBackup();
+    $("whole-map").hidden = !trip.stops.some(function (s) { return s.location.trim(); });
+  }
 
   renderAll();
 

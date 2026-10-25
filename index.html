@@ -8,6 +8,7 @@
 <meta name="theme-color" content="#2f6b5a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png" type="image/png">
+<link rel="stylesheet" href="leaflet.css">
 <style>
 :root {
   --bg: #f3f5f2;
@@ -60,6 +61,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .trip-item.on { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 .trip-item-name { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; }
 .trip-item-name .badge { margin-left: 6px; vertical-align: 2px; }
+.map-sheet { grid-template-rows: auto 1fr auto; }
+.map-head { min-width: 0; }
+.map-body { position: relative; min-height: 0; }
+#map { position: absolute; inset: 0; background: var(--bg); }
+.map-status { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 500; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.15); white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+.sheet footer.map-foot { display: grid; gap: 8px; max-height: 36vh; overflow-y: auto; }
+.map-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.map-list button { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; width: 100%; background: none; border: 0; border-radius: 8px; padding: 6px 4px; text-align: left; cursor: pointer; }
+.map-list button:active { background: var(--accent-soft); }
+.map-list .nm { font-weight: 650; overflow-wrap: anywhere; }
+.map-list .dt { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.map-list li.off .nm { color: var(--muted); }
+.map-missing { margin: 0; color: var(--bad) !important; }
+.pin { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #1c2420; display: grid; place-items: center; font: 700 12px/1 system-ui, sans-serif; color: #1c2420; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+.map-list .pin { box-shadow: none; }
+.leaflet-popup-content { font: 14px/1.4 system-ui, sans-serif; margin: 10px 12px; }
+.leaflet-popup-content strong { display: block; font-size: 15px; }
+.map-btn { font-size: 13px; font-weight: 700; color: var(--accent-fg); background: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.whole-map { justify-self: start; }
 .trip-item-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 main {
   padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
@@ -190,6 +210,7 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
       <button type="button" id="banner-go">Back up now</button>
     </div>
     <div class="summary" id="summary" aria-label="Trip totals"></div>
+    <button class="btn whole-map" type="button" id="whole-map" hidden>Map of the whole trip</button>
     <div class="chips" role="group" aria-label="Show">
       <button class="chip" type="button" data-filter="all" aria-pressed="true">All stops</button>
       <button class="chip" type="button" data-filter="notbooked" aria-pressed="false">Not booked</button>
@@ -341,8 +362,30 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
   </div>
 </dialog>
 
+<dialog id="map-dlg" aria-labelledby="map-title">
+  <div class="sheet map-sheet">
+    <header>
+      <div class="map-head">
+        <h2 id="map-title">Map</h2>
+        <div class="small" id="map-sub"></div>
+      </div>
+      <button class="x" type="button" id="map-close" aria-label="Close map">×</button>
+    </header>
+    <div class="map-body">
+      <div id="map" aria-label="Map of stops"></div>
+      <div class="map-status" id="map-status" role="status" hidden></div>
+    </div>
+    <footer class="map-foot">
+      <ol class="map-list" id="map-list"></ol>
+      <p class="small map-missing" id="map-missing" hidden></p>
+      <div class="route-links" id="map-routes"></div>
+    </footer>
+  </div>
+</dialog>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
+<script src="leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
