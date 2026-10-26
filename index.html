@@ -23,6 +23,7 @@
   --no: #fbe3c8;  --no-fg: #7a4a12;
   --chk: #fff1a8; --chk-fg: #6b5800;
   --bad: #b3261e;
+  --away: #eeedfe; --away-fg: #3c3489; --away-line: #7f77dd;
   --l1: #9cc3e0; --l2: #a9cf8c; --l3: #e8b07c; --l4: #c3a3df; --l5: #e3cc5a;
   --l6: #86cfc4; --l7: #e59bb1; --l8: #a9a9e6; --l9: #b8cc8a; --l10: #d9ad8f;
   color-scheme: light;
@@ -33,6 +34,7 @@
     --accent: #6fb79f; --accent-fg: #0e1a15; --accent-soft: #1f322b;
     --yes: #1e3a2d; --yes-fg: #9fdcbc; --no: #40301c; --no-fg: #f0c48e; --chk: #3d3814; --chk-fg: #ecdc7a;
     --bad: #f2b8b5;
+    --away: #26215c; --away-fg: #cecbf6; --away-line: #9d96e8;
     color-scheme: dark;
   }
 }
@@ -79,7 +81,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .leaflet-popup-content { font: 14px/1.4 system-ui, sans-serif; margin: 10px 12px; }
 .leaflet-popup-content strong { display: block; font-size: 15px; }
 .map-btn { font-size: 13px; font-weight: 700; color: var(--accent-fg); background: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
-.whole-map { justify-self: start; }
+.top-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn.away-add { background: var(--away); color: var(--away-fg); border-color: var(--away-line); }
+.away-band { display: grid; gap: 2px; width: 100%; text-align: left; background: var(--away); color: var(--away-fg); border: 1px solid var(--away-line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+.away-band .t { font-size: 16px; font-weight: 700; }
+.away-band .d { font-size: 14px; font-variant-numeric: tabular-nums; }
+.away-band .n { font-size: 13px; overflow-wrap: anywhere; }
+.badge.away { background: var(--away); color: var(--away-fg); }
+.away-n { color: var(--away-fg); font-weight: 650; }
 .trip-item-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 main {
   padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
@@ -210,7 +219,10 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
       <button type="button" id="banner-go">Back up now</button>
     </div>
     <div class="summary" id="summary" aria-label="Trip totals"></div>
-    <button class="btn whole-map" type="button" id="whole-map" hidden>Map of the whole trip</button>
+    <div class="top-actions">
+      <button class="btn whole-map" type="button" id="whole-map" hidden>Map of the whole trip</button>
+      <button class="btn away-add" type="button" id="add-away">✈ Add away dates</button>
+    </div>
     <div class="chips" role="group" aria-label="Show">
       <button class="chip" type="button" data-filter="all" aria-pressed="true">All stops</button>
       <button class="chip" type="button" data-filter="notbooked" aria-pressed="false">Not booked</button>
@@ -333,6 +345,38 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
     <footer>
       <button class="btn" type="button" id="editor-cancel">Cancel</button>
       <button class="btn primary" type="submit" id="editor-save">Save stop</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="away-dlg" aria-labelledby="away-title">
+  <form class="sheet" id="away-form" method="dialog" novalidate>
+    <header>
+      <h2 id="away-title">Away for work</h2>
+      <button class="x" type="button" id="away-close" aria-label="Close without saving">×</button>
+    </header>
+    <div class="body">
+      <div class="row2">
+        <label for="a-leave">Leaves
+          <input type="date" id="a-leave">
+        </label>
+        <label for="a-back">Back
+          <input type="date" id="a-back">
+        </label>
+      </div>
+      <div class="nights-note" id="a-nights"></div>
+      <label for="a-from">Flying from
+        <input type="text" id="a-from" placeholder="Airport, such as Launceston" autocomplete="off">
+      </label>
+      <label for="a-notes">Notes
+        <textarea id="a-notes" placeholder="Flight times, parking, who's picking him up"></textarea>
+      </label>
+      <p class="small">Stops during these dates turn purple and show “On my own”.</p>
+      <button class="btn danger" type="button" id="delete-away">Delete these away dates</button>
+    </div>
+    <footer>
+      <button class="btn" type="button" id="away-cancel">Cancel</button>
+      <button class="btn primary" type="submit">Save</button>
     </footer>
   </form>
 </dialog>

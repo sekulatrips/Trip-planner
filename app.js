@@ -24,7 +24,7 @@
     return legs;
   }
   function freshTrip(name, starters) {
-    return { id: uid(), name: name || "My trip", legs: blankLegs(starters || []), stops: [] };
+    return { id: uid(), name: name || "My trip", legs: blankLegs(starters || []), stops: [], away: [] };
   }
   function freshStore() {
     var t = freshTrip("My trip", STARTERS);
@@ -52,7 +52,11 @@
         geo: cleanGeo(s.geo)
       };
     });
-    return { id: String(t.id || uid()), name: String(t.name || "My trip").trim() || "My trip", legs: legs, stops: stops };
+    // Times away for work: { id, leave, back, from, notes }
+    var away = (Array.isArray(t.away) ? t.away : []).filter(function (a) { return a && a.leave && a.back; }).map(function (a) {
+      return { id: String(a.id || uid()), leave: String(a.leave), back: String(a.back), from: String(a.from || ""), notes: String(a.notes || "") };
+    });
+    return { id: String(t.id || uid()), name: String(t.name || "My trip").trim() || "My trip", legs: legs, stops: stops, away: away };
   }
 
   // Accepts the current format, or the older one-trip format (which becomes the first trip)
@@ -144,6 +148,53 @@
     return x < y ? -1 : x > y ? 1 : 0;
   }
 
+  // ---------- away for work ----------
+  function awaySorted() { return trip.away.slice().sort(function (a, b) { return a.leave < b.leave ? -1 : a.leave > b.leave ? 1 : 0; }); }
+  function awayNights(a) { return Math.round((ms(a.back) - ms(a.leave)) / DAY); }
+  // Nights of a stop that fall while he's away (a stop with only an arrive date counts its first night)
+  function awayDays(s) {
+    var a = ms(s.arrive), d = ms(s.depart), days = [];
+    if (isNaN(a)) return days;
+    if (isNaN(d) || d <= a) d = a + DAY;
+    for (var t = a; t < d; t += DAY) {
+      if (trip.away.some(function (w) { return t >= ms(w.leave) && t < ms(w.back); })) days.push(t);
+    }
+    return days;
+  }
+  function isAway(s) { return awayDays(s).length > 0; }
+  function awayNightsIn(stops) {
+    var seen = {};
+    stops.forEach(function (s) { if (s.depart) awayDays(s).forEach(function (t) { seen[t] = 1; }); });
+    return Object.keys(seen).length;
+  }
+
+  // Where each away band sits in the stops list: before the stop he leaves on, after the stop he leaves during,
+  // otherwise before the next stop or after the last one. With no dated stops it goes at the top.
+  function placeAway(list) {
+    var dated = list.filter(function (s) { return s.arrive; });
+    var place = { before: {}, after: {}, loose: [] };
+    awaySorted().forEach(function (w) {
+      var during = dated.filter(function (s) { return s.arrive < w.leave && s.depart && s.depart > w.leave; })[0];
+      var next = dated.filter(function (s) { return s.arrive >= w.leave; })[0];
+      var last = dated[dated.length - 1];
+      if (during) (place.after[during.id] = place.after[during.id] || []).push(w);
+      else if (next) (place.before[next.id] = place.before[next.id] || []).push(w);
+      else if (last) (place.after[last.id] = place.after[last.id] || []).push(w);
+      else place.loose.push(w);
+    });
+    return place;
+  }
+
+  function awayBand(w) {
+    var n = awayNights(w);
+    return '<button class="away-band" type="button" data-away="' + esc(w.id) + '" aria-label="Edit away dates">' +
+      '<span class="t">✈ Away for work</span>' +
+      '<span class="d">' + esc(fmt(w.leave) + " → " + fmt(w.back) + " · " + plural(n, "night")) + "</span>" +
+      (w.from ? '<span class="n">Flying from ' + esc(w.from) + "</span>" : "") +
+      (w.notes ? '<span class="n">' + esc(w.notes) + "</span>" : "") +
+      "</button>";
+  }
+
   var toastTimer;
   function toast(msg) {
     var el = $("toast"); el.textContent = msg; el.hidden = false;
@@ -201,7 +252,9 @@
     var when = s.arrive || s.depart
       ? (fmt(s.arrive) || "?") + " → " + (fmt(s.depart) || "?") + (n != null ? " · " + (bad ? "depart is before arrive" : plural(n, "night")) : "")
       : "No dates yet";
+    var away = isAway(s);
     var badges = [];
+    if (away) badges.push('<span class="badge away">On my own</span>');
     if (s.site) badges.push('<span class="badge">' + esc(s.site) + "</span>");
     badges.push(badge("Booked", s.booked));
     badges.push(badge("Dog", s.dog));
@@ -211,7 +264,7 @@
     var m = mapUrl(s);
     if (m) links.push('<a href="' + esc(m) + '" target="_blank" rel="noopener">Map</a>');
     if (s.web) links.push('<a href="' + esc(s.web) + '" target="_blank" rel="noopener">' + webLabel(s.web) + "</a>");
-    return '<div class="card" style="border-left-color:' + legColour(s.leg) + '">' +
+    return '<div class="card" style="border-left-color:' + (away ? "var(--away-line)" : legColour(s.leg)) + '">' +
       '<button class="card-main" type="button" data-id="' + esc(s.id) + '" aria-label="Edit ' + esc(s.location || "stop") + '">' +
       '<div class="when' + (bad ? " bad" : "") + '">' + esc(when) + "</div>" +
       '<div class="where">' + esc(s.location || "Unnamed stop") + "</div>" +
@@ -230,7 +283,8 @@
     if (filter === "dog") list = list.filter(function (s) { return s.dog !== "Yes"; });
 
     if (!trip.stops.length) {
-      el.innerHTML = '<div class="empty"><strong>No stops yet</strong>Tap “+ Add stop” to put in your first stop. Pick its leg, dates and where you’re staying.</div>';
+      el.innerHTML = awaySorted().map(awayBand).join("") +
+        '<div class="empty"><strong>No stops yet</strong>Tap “+ Add stop” to put in your first stop. Pick its leg, dates and where you’re staying.</div>';
       return;
     }
     if (!list.length) {
@@ -243,8 +297,13 @@
     var none = { n: "", stops: [] };
     list.forEach(function (s) { (s.leg ? groups[s.leg - 1] : none).stops.push(s); });
     groups.push(none);
+    // Away bands show in the full list; the filtered lists keep just the purple stops
+    var bands = filter === "all" ? placeAway(list) : { before: {}, after: {}, loose: [] };
+    function withBands(s) {
+      return (bands.before[s.id] || []).map(awayBand).join("") + stopCard(s) + (bands.after[s.id] || []).map(awayBand).join("");
+    }
 
-    el.innerHTML = groups.filter(function (g) { return g.stops.length; }).map(function (g) {
+    el.innerHTML = bands.loose.map(awayBand).join("") + groups.filter(function (g) { return g.stops.length; }).map(function (g) {
       var all = trip.stops.filter(function (s) { return (s.leg || "") === g.n; });
       var t = totals(all);
       var title = g.n ? "Leg " + g.n + " · " + legName(g.n) : "No leg chosen";
@@ -253,19 +312,22 @@
       meta.push(plural(t.nights, "night"));
       if (t.km) meta.push(km(t.km));
       if (t.cost) meta.push(money(t.cost));
+      var awayN = awayNightsIn(all);
       var routes = routeLinks(all);
       var hasPlace = all.some(function (s) { return s.location.trim(); });
       var routeHtml = (g.n && hasPlace) || routes.length ? '<div class="route-links">' +
         (g.n && hasPlace ? '<button class="map-btn" type="button" data-map="' + g.n + '">Show map</button>' : "") +
         routeLinkHtml(routes) + "</div>" : "";
       return '<div class="leg"><div class="leg-head"><span class="dot" style="background:' + legColour(g.n) + '"></span><div>' +
-        "<h2>" + esc(title) + '</h2><div class="meta">' + esc(meta.join(" · ")) + "</div>" + routeHtml + "</div></div>" +
-        g.stops.map(stopCard).join("") + "</div>";
+        "<h2>" + esc(title) + '</h2><div class="meta">' + esc(meta.join(" · ")) +
+        (awayN ? ' · <span class="away-n">Away ' + plural(awayN, "night") + "</span>" : "") + "</div>" + routeHtml + "</div></div>" +
+        g.stops.map(withBands).join("") + "</div>";
     }).join("");
   }
 
   $("stops").addEventListener("click", function (e) {
     var m = e.target.closest("[data-map]"); if (m) { openMap(+m.dataset.map); return; }
+    var w = e.target.closest("[data-away]"); if (w) { openAway(w.dataset.away); return; }
     var c = e.target.closest(".card-main"); if (c) openEditor(c.dataset.id);
   });
   $("whole-map").addEventListener("click", function () { openMap("all"); });
@@ -421,7 +483,8 @@
   // ---------- legs view ----------
   function renderLegs() {
     $("legs").innerHTML = trip.legs.map(function (l) {
-      var t = totals(trip.stops.filter(function (s) { return s.leg === l.n; }));
+      var legStops = trip.stops.filter(function (s) { return s.leg === l.n; });
+      var t = totals(legStops), awayN = awayNightsIn(legStops);
       var tot = t.stops
         ? plural(t.stops, "stop") + " · " + plural(t.nights, "night") + (t.first ? " · " + fmt(t.first) + " – " + fmt(t.last || t.first) : "") + (t.km ? " · " + km(t.km) : "") + (t.cost ? " · " + money(t.cost) : "")
         : "No stops yet";
@@ -429,7 +492,7 @@
         '<span class="leg-num" style="background:' + legColour(l.n) + '">' + l.n + "</span>" +
         '<input type="text" id="leg-name-' + l.n + '" data-leg="' + l.n + '" data-f="name" value="' + esc(l.name) + '" placeholder="Leg ' + l.n + ' title" aria-label="Leg ' + l.n + ' title">' +
         '<input class="route" type="text" id="leg-route-' + l.n + '" data-leg="' + l.n + '" data-f="route" value="' + esc(l.route) + '" placeholder="Route (optional)" aria-label="Leg ' + l.n + ' route">' +
-        '<div class="totals">' + esc(tot) + "</div></div>";
+        '<div class="totals">' + esc(tot) + (awayN ? ' · <span class="away-n">Away ' + plural(awayN, "night") + "</span>" : "") + "</div></div>";
     }).join("");
   }
   $("legs").addEventListener("input", function (e) {
@@ -530,6 +593,52 @@
 
   $("add-stop").addEventListener("click", function () { openEditor(null); });
 
+  // ---------- away editor ----------
+  var awayDlg = $("away-dlg");
+  var awayEditing = null, awayDeleteArmed = false;
+
+  function updateAwayNote() {
+    var a = ms($("a-leave").value), b = ms($("a-back").value), el = $("a-nights");
+    var n = isNaN(a) || isNaN(b) ? null : Math.round((b - a) / DAY);
+    el.className = "nights-note" + (n != null && n <= 0 ? " bad" : "");
+    el.textContent = n == null ? "" : n <= 0 ? "The back date needs to be after the leave date." : "Away " + plural(n, "night");
+  }
+  $("a-leave").addEventListener("input", updateAwayNote);
+  $("a-back").addEventListener("input", updateAwayNote);
+
+  function openAway(id) {
+    var w = id ? trip.away.filter(function (x) { return x.id === id; })[0] : null;
+    w = w || { id: "", leave: "", back: "", from: "", notes: "" };
+    awayEditing = w.id || null;
+    $("away-title").textContent = awayEditing ? "Away for work" : "New away dates";
+    $("a-leave").value = w.leave; $("a-back").value = w.back;
+    $("a-from").value = w.from; $("a-notes").value = w.notes;
+    $("delete-away").hidden = !awayEditing;
+    awayDeleteArmed = false; $("delete-away").textContent = "Delete these away dates";
+    updateAwayNote();
+    awayDlg.showModal();
+  }
+
+  $("away-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var w = { id: awayEditing || uid(), leave: $("a-leave").value, back: $("a-back").value, from: $("a-from").value.trim(), notes: $("a-notes").value.trim() };
+    if (!w.leave || !w.back) { toast("Add both the leave date and the back date"); return; }
+    if (w.back <= w.leave) { toast("The back date needs to be after the leave date"); return; }
+    if (awayEditing) trip.away = trip.away.map(function (x) { return x.id === awayEditing ? w : x; });
+    else trip.away.push(w);
+    save(); awayDlg.close(); renderAll();
+    toast(awayEditing ? "Away dates saved" : "Away dates added");
+  });
+  $("away-close").addEventListener("click", function () { awayDlg.close(); });
+  $("away-cancel").addEventListener("click", function () { awayDlg.close(); });
+  $("delete-away").addEventListener("click", function () {
+    var b = $("delete-away");
+    if (!awayDeleteArmed) { awayDeleteArmed = true; b.textContent = "Tap again to delete"; setTimeout(function () { awayDeleteArmed = false; b.textContent = "Delete these away dates"; }, 3000); return; }
+    trip.away = trip.away.filter(function (x) { return x.id !== awayEditing; });
+    save(); awayDlg.close(); renderAll(); toast("Away dates deleted");
+  });
+  $("add-away").addEventListener("click", function () { openAway(null); });
+
   // ---------- backup ----------
   function stamp() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function backupBlob() {
@@ -593,10 +702,10 @@
 
   function csvCell(v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
   $("save-csv").addEventListener("click", function () {
-    var rows = [["Leg #", "Leg", "Arrive", "Depart", "Nights", "Location", "Where we're staying", "Site type", "Dog OK?", "Booked?", "Cost (AUD)", "Drive (km)", "Notes", "Website", "Map"]];
+    var rows = [["Leg #", "Leg", "Arrive", "Depart", "Nights", "Location", "Where we're staying", "Site type", "Dog OK?", "Booked?", "Cost (AUD)", "Drive (km)", "Notes", "Website", "Map", "On my own?"]];
     trip.stops.slice().sort(byDate).forEach(function (s) {
       var n = nights(s);
-      rows.push([s.leg, s.leg ? legName(s.leg) : "", s.arrive, s.depart, n == null ? "" : n, s.location, s.stay, s.site, s.dog, s.booked, s.cost, s.km, s.notes, s.web, mapUrl(s)]);
+      rows.push([s.leg, s.leg ? legName(s.leg) : "", s.arrive, s.depart, n == null ? "" : n, s.location, s.stay, s.site, s.dog, s.booked, s.cost, s.km, s.notes, s.web, mapUrl(s), isAway(s) ? "Away" : ""]);
     });
     var csv = "﻿" + rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n");
     var slug = trip.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "trip";
@@ -727,7 +836,7 @@
     var hadController = !!navigator.serviceWorker.controller, reloaded = false;
     navigator.serviceWorker.addEventListener("controllerchange", function () {
       if (!hadController || reloaded) return;
-      if (dlg.open || tripsDlg.open) return; // don't reload under someone typing; it shows next time
+      if (dlg.open || tripsDlg.open || awayDlg.open) return; // don't reload under someone typing; it shows next time
       reloaded = true; location.reload();
     });
     window.addEventListener("load", function () {

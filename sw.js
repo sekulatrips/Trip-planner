@@ -1,6 +1,6 @@
 // Keeps the app working with no signal. With signal, always fetch the newest files
 // (so updates arrive straight away); without signal, use the copy saved on the phone.
-var CACHE = "trip-planner-v5";
+var CACHE = "trip-planner-v6";
 var FILES = ["./", "index.html", "app.js", "leaflet.js", "leaflet.css", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {
